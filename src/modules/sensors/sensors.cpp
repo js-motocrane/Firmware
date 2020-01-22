@@ -202,6 +202,10 @@ private:
 
 	void		InitializeVehicleIMU();
 
+	DEFINE_PARAMETERS(
+		(ParamInt<px4::params::SENS_IMU_MODE>) _param_sens_imu_mode
+	)
+
 };
 
 Sensors::Sensors(bool hil_enabled) :
@@ -219,8 +223,6 @@ Sensors::Sensors(bool hil_enabled) :
 	_vehicle_acceleration.Start();
 	_vehicle_angular_velocity.Start();
 	_vehicle_air_data.Start();
-
-	InitializeVehicleIMU();
 }
 
 Sensors::~Sensors()
@@ -424,16 +426,31 @@ void Sensors::InitializeVehicleIMU()
 	for (uint8_t i = 0; i < MAX_SENSOR_COUNT; i++) {
 		if (_vehicle_imu_list[i] == nullptr) {
 
+			bool accel_valid = false;
+			bool gyro_valid = false;
+
 			uORB::Subscription accel_sub{ORB_ID(sensor_accel), i};
-			sensor_accel_s accel{};
-			accel_sub.copy(&accel);
+
+			if (accel_sub.advertised()) {
+				sensor_accel_s accel;
+
+				if (accel_sub.copy(&accel)) {
+					accel_valid = (hrt_elapsed_time(&accel.timestamp) < 1_s) && (accel.device_id > 0);
+				}
+			}
 
 			uORB::Subscription gyro_sub{ORB_ID(sensor_gyro), i};
-			sensor_gyro_s gyro{};
-			gyro_sub.copy(&gyro);
 
-			if (accel.device_id > 0 && gyro.device_id > 0) {
-				VehicleIMU *imu = new VehicleIMU(i, i);
+			if (gyro_sub.advertised()) {
+				sensor_gyro_s gyro;
+
+				if (gyro_sub.copy(&gyro)) {
+					gyro_valid = (hrt_elapsed_time(&gyro.timestamp) < 1_s) && (gyro.device_id > 0);
+				}
+			}
+
+			if (accel_valid && gyro_valid) {
+				VehicleIMU *imu = new VehicleIMU(i, i, i);
 
 				if (imu != nullptr) {
 					// Start VehicleIMU instance and store
