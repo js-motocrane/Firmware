@@ -556,6 +556,10 @@ else
 		reboot
 	fi
 
+	# MOD - JS
+	# start the ADC task
+	#adc_mod start
+
 #
 # End of autostart.
 #
