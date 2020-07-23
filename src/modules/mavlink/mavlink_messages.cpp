@@ -44,6 +44,7 @@
 #include "mavlink_command_sender.h"
 #include "mavlink_simple_analyzer.h"
 #include "mavlink_high_latency2.h"
+//#include <v2.0/c_library_v2/standard/standard.h>
 
 #include "streams/autopilot_version.h"
 #include "streams/flight_information.h"
@@ -117,6 +118,7 @@
 #include <uORB/topics/vehicle_trajectory_waypoint.h>
 #include <uORB/topics/vtol_vehicle_status.h>
 #include <uORB/topics/wind_estimate.h>
+#include <uORB/topics/gen_status.h>
 
 using matrix::Vector3f;
 using matrix::wrap_2pi;
@@ -5178,6 +5180,81 @@ protected:
 	}
 };
 
+class MavlinkStreamGenStatus : public MavlinkStream
+{
+public:
+	const char *get_name() const //override
+	{
+		return MavlinkStreamGenStatus::get_name_static();
+	}
+
+	static constexpr const char *get_name_static()
+	{
+		return "GENERATOR_STATUS";
+	}
+
+	static constexpr uint16_t get_id_static()
+	{
+		return MAVLINK_MSG_ID_GENERATOR_STATUS;
+	}
+
+	uint16_t get_id() //override
+	{
+		return get_id_static();
+	}
+
+	static MavlinkStream *new_instance(Mavlink *mavlink)
+	{
+		return new MavlinkStreamGenStatus(mavlink);
+	}
+
+	unsigned get_size() //override
+	{
+		return (MAVLINK_MSG_ID_GENERATOR_STATUS_LEN + MAVLINK_NUM_NON_PAYLOAD_BYTES);
+		//return _generator_status_sub.advertised() ? (MAVLINK_MSG_ID_GENERATOR_STATUS_LEN +
+		//		MAVLINK_NUM_NON_PAYLOAD_BYTES) : 0;
+	}
+
+private:
+	//MavlinkOrbSubscription *_sub;
+
+	uORB::Subscription _generator_status_sub{ORB_ID(gen_status)};
+
+	/* do not allow top copying this class */
+	MavlinkStreamGenStatus(MavlinkStreamGenStatus &);// = delete;
+	MavlinkStreamGenStatus& operator = (const MavlinkStreamGenStatus &);// = delete;
+
+protected:
+	explicit MavlinkStreamGenStatus(Mavlink *mavlink) : MavlinkStream(mavlink)
+	{}
+
+	bool send(const hrt_abstime t) //override
+	{
+		gen_status_s gen_status_local;
+
+		if (_generator_status_sub.update(&gen_status_local)) {
+			mavlink_generator_status_t msg{};
+
+			//vehicle_angular_velocity_s angular_velocity{};
+			//_angular_velocity_sub.copy(&angular_velocity);
+
+			//msg.timestamp = gen_status_local.timestamp;
+			msg.generator_running = gen_status_local.genrunning;
+			msg.generated_current = gen_status_local.gencurrent;
+			msg.total_energy = gen_status_local.genenergy;
+			msg.power_generated = gen_status_local.genpower;
+			msg.bus_voltage = gen_status_local.genpower / gen_status_local.gencurrent;
+			msg.fuel_pct = gen_status_local.fuelpct;
+
+			mavlink_msg_generator_status_send_struct(_mavlink->get_channel(), &msg);
+
+			return true;
+		}
+
+		return false;
+	}
+};
+
 static const StreamListItem streams_list[] = {
 	create_stream_list_item<MavlinkStreamHeartbeat>(),
 	create_stream_list_item<MavlinkStreamStatustext>(),
@@ -5241,7 +5318,8 @@ static const StreamListItem streams_list[] = {
 	create_stream_list_item<MavlinkStreamAutopilotVersion>(),
 	create_stream_list_item<MavlinkStreamProtocolVersion>(),
 	create_stream_list_item<MavlinkStreamFlightInformation>(),
-	create_stream_list_item<MavlinkStreamStorageInformation>()
+	create_stream_list_item<MavlinkStreamStorageInformation>(),
+	create_stream_list_item<MavlinkStreamGenStatus>()
 };
 
 const char *get_stream_name(const uint16_t msg_id)

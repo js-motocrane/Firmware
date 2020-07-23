@@ -50,14 +50,24 @@
 #include <uORB/uORB.h>
 #include <uORB/topics/battery_status.h>
 #include <uORB/topics/adc_report.h>
+#include <uORB/topics/gen_status.h>
+#include <uORB/topics/debug_key_value.h>
+
+
+#define GEN_ENERGY_THRESH_KJ 100.0 // number of kJ in the full tank
+#define GEN_ENERGY_MAX_KJ 200.0 // max number of kJ to log up to
 
 __EXPORT int px4_simple_app_main(int argc, char *argv[]);
 
 int px4_simple_app_main(int argc, char *argv[])
 {
+
 	PX4_INFO("ADC app start");
 
+	PX4_ERR("TEST ERR");
 
+	//struct debug_key_value_s dbg = {.key = "velx", .value = 0.0f};
+	//orb_advert_t pub_dbg = orb_advertise(ORB_ID(debug_key_value),&dbg);
 
 	// subscribe to adc_report topic
 	int adc_sub_fd = orb_subscribe(ORB_ID(adc_report));
@@ -69,10 +79,10 @@ int px4_simple_app_main(int argc, char *argv[])
 	// limit update rate to 20 Hz
 	orb_set_interval(bat_volt_fd,1500);
 
-	// not really sure this is needed below
-	struct adc_report_s adc_struct;
-	memset(&adc_struct, 0, sizeof(adc_struct));
-	orb_advert_t adc_pub = orb_advertise(ORB_ID(adc_report), &adc_struct);
+	// set the custom uORB message up for publishing and advertising
+	struct gen_status_s gen_struct;
+	memset(&gen_struct, 0, sizeof(gen_struct));
+	orb_advert_t gen_pub = orb_advertise(ORB_ID(gen_status), &gen_struct);
 
 	// one could wait for multiple topics with this technique, just using one here
 	px4_pollfd_struct_t fds[] = {
@@ -89,6 +99,8 @@ int px4_simple_app_main(int argc, char *argv[])
 	double pwrIntegral = 0.0;
 	double sysVoltage = 50.0; // temporary
 	double sysCurrent = 0.0;
+
+	float fuelpct_local = 100.0; // start at 100 percent
 
 	uint64_t prevTime;
 	uint8_t timeCaptured = 0;
@@ -156,18 +168,56 @@ int px4_simple_app_main(int argc, char *argv[])
 				{
 					sysCurrent = 0.0;
 				}
-				// read system voltage?
-				pwrIntegral += sysCurrent * sysVoltage * dt * 0.001; // converting to kJ
-
+				// cap the pwrIntegral to prevent it from overflowing
+				if(pwrIntegral > GEN_ENERGY_MAX_KJ)
+				{
+					pwrIntegral = GEN_ENERGY_MAX_KJ;
+				}
+				else
+				{
+					// read system voltage?
+					pwrIntegral += sysCurrent * sysVoltage * dt * 0.001; // converting to kJ
+				}
 				//PX4_INFO("Analog:\t%8.4f",(double)raw.raw_data[8]);
-				PX4_INFO("(A): %4.2f, (V): %3.1f, (J): %8.4f",sysCurrent,sysVoltage,pwrIntegral);
+
+				//PX4_INFO("(A): %4.2f, (V): %3.1f, (J): %8.4f",sysCurrent,sysVoltage,pwrIntegral);
 
 				/* set att and publish this information for other apps
 				 the following does not have any meaning, it's just an example
 				*/
-				adc_struct.raw_data[8] = raw.raw_data[8];
 
-				orb_publish(ORB_ID(adc_report), adc_pub, &adc_struct);
+				// calculate total percentage remaining
+				fuelpct_local = 100.0-(uint8_t)(pwrIntegral/GEN_ENERGY_THRESH_KJ*100.0);
+				if (fuelpct_local < 0)
+				{
+					fuelpct_local = 0.0;
+				}
+
+				gen_struct.timestamp = raw.timestamp;
+				gen_struct.genpower = (float)(sysCurrent*sysVoltage);
+				gen_struct.genenergy = (float)(pwrIntegral);
+				gen_struct.gencurrent = (float)(sysCurrent);
+				gen_struct.fuelpct = fuelpct_local;
+
+				// TO-DO - figure out more logic here in the future for detecting stalls
+				if (sysCurrent < 2.0)
+				{
+					gen_struct.genrunning = 0;
+				}
+				else
+				{
+					gen_struct.genrunning = 1;
+				}
+
+				// DEBUG
+
+				//dbg.value = pwrIntegral;
+				//orb_publish(ORB_ID(debug_key_value),pub_dbg,&dbg);
+
+				//adc_struct.raw_data[8] = raw.raw_data[8];
+
+				//orb_publish(ORB_ID(adc_report), adc_pub, &adc_struct);
+				orb_publish(ORB_ID(gen_status),gen_pub,&gen_struct);
 			}
 
 			/* there could be more file descriptors here, in the form like:

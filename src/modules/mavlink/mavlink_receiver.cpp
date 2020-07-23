@@ -2322,7 +2322,7 @@ MavlinkReceiver::handle_message_cellular_status(mavlink_message_t *msg)
 	cellular_status.mcc = status.mcc;
 	cellular_status.mnc = status.mnc;
 	cellular_status.lac = status.lac;
-	cellular_status.cid = status.cid;
+	//cellular_status.cid = status.cid;
 
 	_cellular_status_pub.publish(cellular_status);
 }
